@@ -1,0 +1,38 @@
+name: Compilar AutoPlay
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar XcodeGen
+        run: brew install xcodegen
+
+      - name: Crear proyecto de Xcode
+        run: xcodegen generate
+
+      - name: Compilar la app (sin firmar)
+        run: |
+          xcodebuild -project AutoPlay.xcodeproj -target AutoPlay \
+            -configuration Release -sdk iphoneos \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build | tee build.log | grep -E "error:|warning: unable|BUILD" || true
+          test -d build/Release-iphoneos/AutoPlay.app || (grep -B2 -A6 "error:" build.log; exit 1)
+
+      - name: Empaquetar .ipa
+        run: |
+          mkdir Payload
+          cp -R build/Release-iphoneos/AutoPlay.app Payload/
+          zip -qry AutoPlay.ipa Payload
+
+      - name: Subir AutoPlay.ipa
+        uses: actions/upload-artifact@v4
+        with:
+          name: AutoPlay-ipa
+          path: AutoPlay.ipa
