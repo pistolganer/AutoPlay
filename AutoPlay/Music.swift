@@ -77,10 +77,19 @@ func timeString(_ t: TimeInterval) -> String {
 struct NowPlayingCard: View {
     @ObservedObject var music: MusicModel
     var onTap: (() -> Void)? = nil
+    @AppStorage("fuenteMusica") private var source = "spotify"
     @Environment(\.openURL) private var openURL
     private let pink = Color(red: 1, green: 0.27, blue: 0.45)
 
     var body: some View {
+        if source == "spotify" {
+            SpotifyCard()
+        } else {
+            appleCard
+        }
+    }
+
+    private var appleCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 14) {
                 Artwork(image: music.artwork)
@@ -176,8 +185,15 @@ struct Artwork: View {
 
 struct MusicScreen: View {
     @ObservedObject var music: MusicModel
+    @AppStorage("fuenteMusica") private var source = "spotify"
     var body: some View {
         VStack(spacing: 8) {
+            Picker("Música", selection: $source) {
+                Text("Spotify").tag("spotify")
+                Text("Apple Music").tag("apple")
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 4)
             NowPlayingCard(music: music)
             HStack(spacing: 12) {
                 Image(systemName: "speaker.fill").foregroundStyle(.secondary)
@@ -200,4 +216,148 @@ struct VolumeSlider: UIViewRepresentable {
         return v
     }
     func updateUIView(_ uiView: MPVolumeView, context: Context) {}
+}
+
+// MARK: - Spotify (control con Atajos de iOS, funciona con Spotify gratis)
+
+enum SpotifyRemote {
+    static let play = "AutoPlay Play"
+    static let next = "AutoPlay Siguiente"
+    static let previous = "AutoPlay Anterior"
+
+    /// Ejecuta un atajo de la app Atajos y vuelve a AutoPlay automáticamente.
+    static func run(_ name: String, openURL: OpenURLAction) {
+        let n = name.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? name
+        let back = "autoplay%3A%2F%2F"
+        if let u = URL(string: "shortcuts://x-callback-url/run-shortcut?name=\(n)&x-success=\(back)&x-error=\(back)&x-cancel=\(back)") {
+            openURL(u)
+        }
+    }
+
+    static func open(_ openURL: OpenURLAction) {
+        openApp("spotify://", fallback: "https://apps.apple.com/app/id324684580", openURL: openURL)
+    }
+}
+
+struct SpotifyCard: View {
+    @AppStorage("spotifySonando") private var playing = false
+    @State private var showHelp = false
+    @Environment(\.openURL) private var openURL
+    @ObservedObject private var icons = IconStore.shared
+    private let green = Color(red: 0.11, green: 0.84, blue: 0.38)
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 14) {
+                Button { SpotifyRemote.open(openURL) } label: { cover }
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Spotify").font(.system(size: 22, weight: .bold))
+                    Text(playing ? "Reproduciendo" : "En pausa")
+                        .font(.system(size: 15)).foregroundStyle(Color(white: 0.85))
+                    Text("Toca la imagen para elegir canción")
+                        .font(.system(size: 13)).foregroundStyle(green).lineLimit(2)
+                }
+                Spacer(minLength: 0)
+                Button { showHelp = true } label: {
+                    Image(systemName: "questionmark.circle").font(.system(size: 20)).foregroundStyle(Color(white: 0.6))
+                }
+            }
+            .frame(maxHeight: .infinity)
+
+            Equalizer(active: playing, color: green).frame(height: 18)
+
+            HStack {
+                Spacer()
+                ctrl("backward.end.fill", 28) { SpotifyRemote.run(SpotifyRemote.previous, openURL: openURL); playing = true }
+                Spacer()
+                ctrl(playing ? "pause.circle.fill" : "play.circle.fill", 52) {
+                    SpotifyRemote.run(SpotifyRemote.play, openURL: openURL); playing.toggle()
+                }
+                Spacer()
+                ctrl("forward.end.fill", 28) { SpotifyRemote.run(SpotifyRemote.next, openURL: openURL); playing = true }
+                Spacer()
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(
+            LinearGradient(colors: [Color(red: 0.07, green: 0.33, blue: 0.17), Color(red: 0.05, green: 0.06, blue: 0.07)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing),
+            in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .sheet(isPresented: $showHelp) { SpotifyHelp() }
+    }
+
+    @ViewBuilder private var cover: some View {
+        let _ = icons.version
+        if let img = icons.image(for: "Spotify") {
+            Image(uiImage: img).resizable().scaledToFill()
+                .frame(maxWidth: 130, maxHeight: 130).aspectRatio(1, contentMode: .fit)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        } else {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(LinearGradient(colors: [green, Color(red: 0.03, green: 0.35, blue: 0.16)],
+                                     startPoint: .topLeading, endPoint: .bottomTrailing))
+                .aspectRatio(1, contentMode: .fit)
+                .frame(maxWidth: 130, maxHeight: 130)
+                .overlay(Image(systemName: "music.note.list").font(.system(size: 42)).foregroundStyle(.white))
+        }
+    }
+
+    private func ctrl(_ symbol: String, _ size: CGFloat, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: size)).foregroundStyle(.white)
+                .frame(minWidth: 50, minHeight: 50)
+        }
+    }
+}
+
+struct Equalizer: View {
+    let active: Bool
+    let color: Color
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 0.12, paused: !active)) { ctx in
+            let t = ctx.date.timeIntervalSinceReferenceDate
+            HStack(alignment: .bottom, spacing: 3) {
+                ForEach(0..<28, id: \.self) { i in
+                    let h = active ? 0.25 + 0.75 * abs(sin(t * (2.0 + Double(i % 5) * 0.7) + Double(i))) : 0.15
+                    Capsule().fill(color.opacity(active ? 0.9 : 0.35))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 18 * h)
+                }
+            }
+            .frame(maxHeight: .infinity, alignment: .bottom)
+        }
+    }
+}
+
+struct SpotifyHelp: View {
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Text("El iPhone no deja que otras apps controlen Spotify directamente. AutoPlay lo hace con 3 atajos de la app **Atajos**. Solo hay que crearlos una vez.")
+                }
+                Section("Atajo 1 – «\(SpotifyRemote.play)»") {
+                    Text("Atajos → **+** → Añadir acción → busca **«Reproducir/pausar»** y añádela.")
+                    Text("Arriba, toca el nombre y ponle exactamente: **\(SpotifyRemote.play)**")
+                }
+                Section("Atajo 2 – «\(SpotifyRemote.next)»") {
+                    Text("Nuevo atajo → busca **«Saltar»** y añade **«Saltar hacia delante»** (o «Siguiente»).")
+                    Text("Nombre: **\(SpotifyRemote.next)**")
+                }
+                Section("Atajo 3 – «\(SpotifyRemote.previous)»") {
+                    Text("Nuevo atajo → **«Saltar hacia atrás»** (o «Anterior»).")
+                    Text("Nombre: **\(SpotifyRemote.previous)**")
+                }
+                Section("La primera vez") {
+                    Text("Al pulsar un botón, el iPhone preguntará si AutoPlay puede abrir Atajos: pulsa **Abrir**/**Permitir**. Verás un parpadeo y vuelve solo a AutoPlay.")
+                    Text("Para poner el logo real: en el inicio de AutoPlay mantén pulsado el icono de Spotify → «Cambiar icono» y elige una captura. Saldrá también en esta tarjeta.")
+                }
+            }
+            .navigationTitle("Controlar Spotify")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { Button("Listo") { dismiss() } }
+        }
+    }
 }

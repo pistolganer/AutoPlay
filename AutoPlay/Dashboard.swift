@@ -15,6 +15,8 @@ struct DashboardScreen: View {
     @State private var showSearch = false
     @Environment(\.openURL) private var openURL
     @AppStorage("favoritos") private var favoritos = defaultFavorites
+    @AppStorage("fuenteMusica") private var source = "spotify"
+    @AppStorage("spotifySonando") private var spotifyPlaying = false
 
     var body: some View {
         GeometryReader { g in
@@ -95,6 +97,18 @@ struct DashboardScreen: View {
         let t = raw.lowercased().trimmingCharacters(in: .whitespaces)
         guard !t.isEmpty else { return }
 
+        if source == "spotify" {
+            if t.contains("pausa") || t.contains("para la música") {
+                if spotifyPlaying { SpotifyRemote.run(SpotifyRemote.play, openURL: openURL); spotifyPlaying = false }
+                return
+            }
+            if t.contains("siguiente") { SpotifyRemote.run(SpotifyRemote.next, openURL: openURL); return }
+            if t.contains("anterior") { SpotifyRemote.run(SpotifyRemote.previous, openURL: openURL); return }
+            if t.contains("pon música") || t.contains("reproduce") || t == "música" {
+                if !spotifyPlaying { SpotifyRemote.run(SpotifyRemote.play, openURL: openURL); spotifyPlaying = true }
+                return
+            }
+        }
         if t.contains("pausa") || t.contains("para la música") {
             if music.isPlaying { music.toggle() }; return
         }
